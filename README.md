@@ -81,11 +81,13 @@ recording, false positives on voice alone, de-noise and de-ess.
 
 ## Making a release
 
-1. Update the version number in `VERSION`.
-2. Commit, then tag the commit and push: `git tag v1.0.1 && git push origin v1.0.1`
+1. Update the version number in `VERSION` (for example `1.0.1`).
+2. Commit and push to `main`.
 
-GitHub Actions builds the plugin on Windows, macOS and Linux and runs the tests. It then builds each
-installer, **installs it on a clean machine** to check it, and publishes all three to a GitHub Release.
+GitHub Actions then builds the plugin on Windows, macOS and Linux and runs the tests. It builds
+each installer, **installs it on a clean machine** to check it, and publishes all three as the
+`v1.0.1` release. The release only goes public once every installer has passed. Pushes that don't
+change `VERSION` just build and test.
 
 ## License note
 
