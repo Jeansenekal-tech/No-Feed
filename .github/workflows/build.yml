@@ -1,0 +1,139 @@
+name: Build installers
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to publish releases on version tags
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: Windows }
+          - { os: macos-latest,   name: macOS }
+          - { os: ubuntu-22.04,   name: Linux }
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        shell: bash
+        run: echo "VERSION=$(head -n1 VERSION | tr -d '[:space:]')" >> "$GITHUB_ENV"
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxcomposite-dev libxext-dev libfreetype6-dev libfontconfig1-dev ninja-build
+
+      - name: Configure
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          elif [ "$RUNNER_OS" == "Linux" ]; then
+            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          else
+            cmake -S . -B build
+          fi
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Run DSP tests
+        shell: bash
+        run: |
+          exe=$(find build -type f \( -name NoFeedTests -o -name NoFeedTests.exe \) | head -1)
+          "$exe"
+
+      # ---------------- Windows: Inno Setup installer ----------------
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=$env:VERSION" "/DBuildDir=$PWD\build\NoFeed_artefacts\Release" "/DOutputDir=$PWD\dist" installer\windows\NoFeed.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test Windows installer (install + uninstall)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\NoFeed-*-Windows-Setup.exe | Select-Object -First 1
+          Start-Process -Wait -FilePath $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          $vst3 = "$env:CommonProgramFiles\VST3\NoFeed.vst3\Contents\x86_64-win\NoFeed.vst3"
+          $app  = "$env:ProgramFiles\NoFeed\NoFeed.exe"
+          if (-not (Test-Path $vst3)) { throw "VST3 not installed at $vst3" }
+          if (-not (Test-Path $app))  { throw "App not installed at $app" }
+          Write-Host "Installed OK"
+          Start-Process -Wait -FilePath "$env:ProgramFiles\NoFeed\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          Start-Sleep -Seconds 3
+          if (Test-Path "$env:CommonProgramFiles\VST3\NoFeed.vst3") { throw "Uninstaller left the VST3 behind" }
+          Write-Host "Uninstalled OK"
+
+      # ---------------- macOS: .pkg installer ----------------
+      - name: Build macOS installer
+        if: runner.os == 'macOS'
+        run: installer/macos/build-pkg.sh "$VERSION" build/NoFeed_artefacts/Release dist
+
+      - name: Test macOS installer
+        if: runner.os == 'macOS'
+        run: |
+          sudo installer -pkg dist/NoFeed-*-macOS.pkg -target /
+          test -d /Library/Audio/Plug-Ins/VST3/NoFeed.vst3
+          test -d /Library/Audio/Plug-Ins/Components/NoFeed.component
+          test -d /Applications/NoFeed.app
+          lipo -info /Library/Audio/Plug-Ins/VST3/NoFeed.vst3/Contents/MacOS/NoFeed
+          codesign --verify --deep /Library/Audio/Plug-Ins/VST3/NoFeed.vst3
+          echo "Installed OK"
+
+      # ---------------- Linux: tar.gz + install.sh ----------------
+      - name: Build Linux package
+        if: runner.os == 'Linux'
+        run: |
+          pkg="NoFeed-$VERSION-Linux-x86_64"
+          mkdir -p "stage/$pkg" dist
+          cp -R build/NoFeed_artefacts/Release/VST3/NoFeed.vst3 "stage/$pkg/"
+          cp build/NoFeed_artefacts/Release/Standalone/NoFeed "stage/$pkg/"
+          cp installer/linux/install.sh "stage/$pkg/"
+          tar -C stage -czf "dist/$pkg.tar.gz" "$pkg"
+
+      - name: Test Linux installer
+        if: runner.os == 'Linux'
+        run: |
+          mkdir t && tar -C t -xzf dist/NoFeed-*-Linux-x86_64.tar.gz
+          t/NoFeed-*/install.sh
+          test -f ~/.vst3/NoFeed.vst3/Contents/x86_64-linux/NoFeed.so
+          test -x ~/.local/bin/NoFeed
+          t/NoFeed-*/install.sh --uninstall
+          test ! -e ~/.vst3/NoFeed.vst3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NoFeed-${{ matrix.name }}-installer
+          path: dist/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
