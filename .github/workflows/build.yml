@@ -119,21 +119,20 @@ jobs:
           t/NoFeed-*/install.sh --uninstall
           test ! -e ~/.vst3/NoFeed.vst3
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: NoFeed-${{ matrix.name }}-installer
-          path: dist/*
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      # Release assets don't count against the Actions artifact storage quota, so on version
+      # tags every job attaches its installer to the release directly.
+      - name: Attach installer to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+
+      # Downloadable build for untagged pushes. Best effort: a full artifact quota must not fail the build.
+      - uses: actions/upload-artifact@v4
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        continue-on-error: true
+        with:
+          name: NoFeed-${{ matrix.name }}-installer
+          path: dist/*
+          retention-days: 1
