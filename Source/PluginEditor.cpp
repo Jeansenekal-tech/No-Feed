@@ -336,16 +336,18 @@ void DeFeedbackEditor::resized()
 
     mainHeader = mainArea.removeFromTop (18);
     mainArea.removeFromTop (4);
-    amountArea = mainArea.removeFromLeft (220);
+    amountArea = mainArea.removeFromLeft (260);
     {
-        auto a = amountArea.reduced (8);
-        removedLabel.setBounds (a.removeFromBottom (20));
+        auto a = amountArea.reduced (6);
+        removedLabel.setBounds (a.removeFromBottom (18));
         amount.label.setBounds (a.removeFromTop (20));
         amount.slider.setBounds (a);
     }
-    mainArea.removeFromLeft (20);
+    mainArea.removeFromLeft (24);
     std::vector<Knob*> rest { &deEss, &deEssFreq, &output };
-    layoutRow (mainArea.withTrimmedTop (10), rest, juce::jmin (130, mainArea.getWidth() / 3));
+    const int cellH = juce::jmin (120, mainArea.getHeight());
+    layoutRow (mainArea.withSizeKeepingCentre (mainArea.getWidth(), cellH).withX (mainArea.getX()),
+               rest, juce::jmin (110, mainArea.getWidth() / 3));
 
     notchHeader = notchArea.removeFromTop (18);
     layoutRow (notchArea, notchRow, notchArea.getWidth() / (int) notchRow.size());

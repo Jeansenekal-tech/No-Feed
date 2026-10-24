@@ -47,8 +47,9 @@ The chain is **AI voice isolation → Notch Assist (optional) → De-Ess → Out
   removed, including feedback, the speaker's own sound coming back into the mic, room reverb, hiss
   and hum. Removing the speaker's sound breaks the feedback loop itself, so feedback can't build up.
   This is the same idea as Alpha Labs De-Feedback.
-- **Notch Assist** (optional, zero latency): classic adaptive notch filters that hunt for ringing
-  tones. Turn it on as a safety net in extreme rooms.
+- **Notch Assist** (on by default, zero latency): classic adaptive notch filters that hunt for
+  ringing tones. They act as a safety net behind the AI. AI and notches together were the
+  strongest combination in every test.
 - **De-Ess** (zero latency): dips the top end only while an "s" or "sh" is happening.
 
 ### Controls
@@ -59,13 +60,27 @@ The chain is **AI voice isolation → Notch Assist (optional) → De-Ess → Out
 | **De-Ess / Ess Freq** | De-esser amount (0 % = off) and the sibilance frequency. |
 | **Output** | Output level. |
 | **Listen** | Hear only what is being removed. |
-| **Notch Assist** | Turns on the classic notch filters, with their own Sensitivity, Speed, Release, Max Depth, Notch Q, Filters, Low/High Limit, Lock and Reset controls. |
+| **Notch Assist** | The classic notch filters behind the AI (on by default), with their own Sensitivity, Speed, Release, Max Depth, Notch Q, Filters, Low/High Limit, Lock and Reset controls. |
 
 The display shows the input (grey) and the voice the AI keeps (cyan). The gap between them is
 what the AI removes, and the readout under **Amount** shows how many dB it is currently taking out.
 
 **Tips:** put NoFeed first on the vocal mic channel and leave Amount at 100 %. If the voice sounds
 too dry or processed for a quiet room, back Amount off to 60–80 %.
+
+### How well it works
+
+Benchmark on 96 simulated rooms and a speaker that the model never saw during training
+(`training/eval_closed.py`). The table shows the share of rooms where the loop still feeds back:
+
+| Loop gain past the feedback point | No processing | NoFeed AI |
+|---|---|---|
+| +0 to +3 dB | 23 % | **2 %** |
+| +3 to +6 dB | 80 % | **3 %** |
+| +6 to +8 dB | 95 % | **14 %** |
+
+In other words, NoFeed gives you several dB of extra **gain before feedback**. A growing howl is
+cut by about 20 dB, and a steady tone by about 12 dB.
 
 **Known limits:** the AI was trained on speech and some singing at 48 kHz (44.1–192 kHz hosts are
 supported). It is tuned for vocals, not instruments. It needs roughly 10–15 % of one CPU core per

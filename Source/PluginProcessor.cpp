@@ -54,7 +54,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DeFeedbackProcessor::createL
     };
 
     layout.add (pct (ParamIDs::aiAmount, "Amount", 100.0f));
-    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::notchAssist, 1 }, "Notch Assist", false));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::notchAssist, 1 }, "Notch Assist", true));
 
     layout.add (pct (ParamIDs::sensitivity, "Sensitivity", 50.0f));
     layout.add (pct (ParamIDs::speed, "Speed", 60.0f));
