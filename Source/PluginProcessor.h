@@ -3,7 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "FeedbackEngine.h"
 #include "DeEsser.h"
-#include "Denoiser.h"
+#include "AiVoiceEngine.h"
 
 namespace ParamIDs
 {
@@ -15,11 +15,11 @@ namespace ParamIDs
     inline constexpr const char* filters     = "filters";
     inline constexpr const char* lowHz       = "lowHz";
     inline constexpr const char* highHz      = "highHz";
-    inline constexpr const char* mix         = "mix";
     inline constexpr const char* output      = "output";
     inline constexpr const char* lock        = "lock";
     inline constexpr const char* listen      = "listen";
-    inline constexpr const char* deNoise     = "deNoise";
+    inline constexpr const char* aiAmount    = "aiAmount";
+    inline constexpr const char* notchAssist = "notchAssist";
     inline constexpr const char* deEss       = "deEss";
     inline constexpr const char* deEssFreq   = "deEssFreq";
 }
@@ -54,23 +54,25 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    /** Clears every deployed notch (safe to call from the UI thread). */
+    /** Clears every deployed notch of Notch Assist (safe to call from the UI thread). */
     void requestReset() noexcept                           { resetRequested.store (true); }
 
     const dfb::FeedbackEngine& getEngine() const noexcept  { return engine; }
     const dfb::DeEsser& getDeEsser() const noexcept        { return deEsser; }
-    const dfb::Denoiser& getDenoiser() const noexcept      { return denoiser; }
+    const dfb::AiVoiceEngine& getAi() const noexcept       { return ai; }
+    bool isNotchAssistOn() const noexcept                  { return pNotchAssist->load() > 0.5f; }
     juce::AudioProcessorValueTreeState apvts;
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
-    dfb::FeedbackEngine engine;
-    dfb::Denoiser denoiser;
+    dfb::AiVoiceEngine ai;
+    dfb::FeedbackEngine engine;          // "Notch Assist"
     dfb::DeEsser deEsser;
-    juce::AudioBuffer<float> dryBuffer, dryDelay;   // dry path is delayed to match the de-noiser
+    juce::AudioBuffer<float> dryBuffer, dryDelay;   // dry path delayed by the AI latency (for Listen)
     int dryDelayPos = 0;
-    juce::SmoothedValue<float> mixSmoothed, outputSmoothed;
+    bool notchAssistWasOn = false;
+    juce::SmoothedValue<float> outputSmoothed;
     std::atomic<bool> resetRequested { false };
 
     std::atomic<float>* pSensitivity = nullptr;
@@ -81,11 +83,11 @@ private:
     std::atomic<float>* pFilters     = nullptr;
     std::atomic<float>* pLowHz       = nullptr;
     std::atomic<float>* pHighHz      = nullptr;
-    std::atomic<float>* pMix         = nullptr;
     std::atomic<float>* pOutput      = nullptr;
     std::atomic<float>* pLock        = nullptr;
     std::atomic<float>* pListen      = nullptr;
-    std::atomic<float>* pDeNoise     = nullptr;
+    std::atomic<float>* pAiAmount    = nullptr;
+    std::atomic<float>* pNotchAssist = nullptr;
     std::atomic<float>* pDeEss       = nullptr;
     std::atomic<float>* pDeEssFreq   = nullptr;
 

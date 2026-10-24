@@ -88,6 +88,12 @@ jobs:
           exe=$(find build -type f \( -name NoFeedTests -o -name NoFeedTests.exe \) | head -1)
           "$exe"
 
+      - name: Run AI tests (C++ matches PyTorch, reconstruction, CPU)
+        shell: bash
+        run: |
+          exe=$(find build -type f \( -name NoFeedAiTest -o -name NoFeedAiTest.exe \) | head -1)
+          "$exe" Resources/model.bin Tests/data/parity.bin
+
       - name: Check Windows plugin has no VC++ runtime DLL dependency
         if: runner.os == 'Windows'
         shell: pwsh

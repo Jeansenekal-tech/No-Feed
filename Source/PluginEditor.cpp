@@ -9,6 +9,7 @@ namespace Colours
     const juce::Colour dim        { 0xff7d8794 };
     const juce::Colour accent     { 0xff3fc1c9 };
     const juce::Colour notch      { 0xffff5a5f };
+    const juce::Colour input      { 0xff5d6673 };
 }
 
 //==============================================================================
@@ -63,23 +64,24 @@ void DeFeedbackLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Butto
 }
 
 //==============================================================================
-SpectrumView::SpectrumView (const dfb::FeedbackEngine& e) : engine (e)
+SpectrumView::SpectrumView (const DeFeedbackProcessor& p) : processor (p)
 {
-    spectrum.fill (-120.0f);
+    inDb.fill (-120.0f);
+    outDb.fill (-120.0f);
     startTimerHz (30);
 }
 
 void SpectrumView::timerCallback()
 {
-    engine.getDisplaySpectrum (spectrum.data(), (int) spectrum.size());
-    notches = engine.getNotches();
+    processor.getAi().getDisplay (inDb.data(), outDb.data(), (int) inDb.size());
+    showNotches = processor.isNotchAssistOn();
+    notches = processor.getEngine().getNotches();
     repaint();
 }
 
 float SpectrumView::xForFreq (float f) const
 {
-    const float lo = dfb::FeedbackEngine::kDisplayMinHz, hi = dfb::FeedbackEngine::kDisplayMaxHz;
-    return (float) getWidth() * std::log (f / lo) / std::log (hi / lo);
+    return (float) getWidth() * std::log (f / 20.0f) / std::log (1000.0f);
 }
 
 float SpectrumView::yForDb (float db) const
@@ -88,13 +90,26 @@ float SpectrumView::yForDb (float db) const
     return juce::jmap (juce::jlimit (bottom, top, db), top, bottom, 0.0f, (float) getHeight());
 }
 
+juce::Path SpectrumView::makePath (const float* db, int n, bool closed) const
+{
+    juce::Path p;
+    const float w = (float) getWidth(), h = (float) getHeight();
+    for (int i = 0; i < n; ++i)
+    {
+        const float x = w * (float) i / (float) (n - 1), y = yForDb (db[i]);
+        if (i == 0) { if (closed) { p.startNewSubPath (x, h); p.lineTo (x, y); } else p.startNewSubPath (x, y); }
+        else p.lineTo (x, y);
+    }
+    if (closed) { p.lineTo (w, h); p.closeSubPath(); }
+    return p;
+}
+
 void SpectrumView::paint (juce::Graphics& g)
 {
     const auto area = getLocalBounds().toFloat();
     g.setColour (Colours::panel);
     g.fillRoundedRectangle (area, 6.0f);
 
-    // grid
     g.setFont (juce::FontOptions (11.0f));
     for (float f : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
     {
@@ -114,116 +129,106 @@ void SpectrumView::paint (juce::Graphics& g)
         g.drawText (juce::String ((int) db), 4, (int) y - 13, 40, 12, juce::Justification::left);
     }
 
-    // spectrum
-    juce::Path fill, line;
-    const int n = (int) spectrum.size();
-    for (int i = 0; i < n; ++i)
-    {
-        const float x = area.getWidth() * (float) i / (float) (n - 1);
-        const float y = yForDb (spectrum[(size_t) i]);
-        if (i == 0) { line.startNewSubPath (x, y); fill.startNewSubPath (x, area.getHeight()); }
-        else          line.lineTo (x, y);
-        fill.lineTo (x, y);
-    }
-    fill.lineTo (area.getWidth(), area.getHeight());
-    fill.closeSubPath();
+    const int n = (int) inDb.size();
 
-    g.setGradientFill (juce::ColourGradient (Colours::accent.withAlpha (0.35f), 0.0f, 0.0f,
-                                             Colours::accent.withAlpha (0.03f), 0.0f, area.getHeight(), false));
-    g.fillPath (fill);
+    // what goes in (grey) vs. what the AI keeps (cyan): the gap between them is removed
+    g.setColour (Colours::input.withAlpha (0.35f));
+    g.fillPath (makePath (inDb.data(), n, true));
+    g.setColour (Colours::input);
+    g.strokePath (makePath (inDb.data(), n, false), juce::PathStrokeType (1.2f));
+
+    g.setGradientFill (juce::ColourGradient (Colours::accent.withAlpha (0.45f), 0.0f, 0.0f,
+                                             Colours::accent.withAlpha (0.05f), 0.0f, area.getHeight(), false));
+    g.fillPath (makePath (outDb.data(), n, true));
     g.setColour (Colours::accent);
-    g.strokePath (line, juce::PathStrokeType (1.5f));
+    g.strokePath (makePath (outDb.data(), n, false), juce::PathStrokeType (1.6f));
 
-    // combined notch response, drawn hanging from the top of the display (0 dB line)
+    // legend
+    g.setFont (juce::FontOptions (11.0f));
+    g.setColour (Colours::input.brighter (0.4f));
+    g.drawText ("INPUT", getWidth() - 140, 6, 60, 14, juce::Justification::right);
+    g.setColour (Colours::accent);
+    g.drawText ("VOICE OUT", getWidth() - 76, 6, 70, 14, juce::Justification::right);
+
+    if (! showNotches)
+        return;
+
     juce::Path response;
     bool anyActive = false;
-    const float scale = 1.0f;   // 1 dB of cut = 1 dB on the display
     for (int px = 0; px <= getWidth(); px += 2)
     {
-        const float f = dfb::FeedbackEngine::kDisplayMinHz
-                      * std::pow (dfb::FeedbackEngine::kDisplayMaxHz / dfb::FeedbackEngine::kDisplayMinHz, (float) px / (float) getWidth());
+        const float f = 20.0f * std::pow (1000.0f, (float) px / (float) getWidth());
         float totalDb = 0.0f;
         for (const auto& nt : notches)
         {
             if (! nt.active) continue;
             anyActive = true;
-            // analog RBJ bell: |H|^2 = ((1-w^2)^2 + (wA/Q)^2) / ((1-w^2)^2 + (w/(AQ))^2)
             const float A = std::pow (10.0f, -nt.depthDb / 40.0f);
             const float w = f / nt.freq, a = 1.0f - w * w;
-            const float num = a * a + juce::square (w * A / nt.q);
-            const float den = a * a + juce::square (w / (A * nt.q));
-            totalDb += 10.0f * std::log10 (num / den);
+            totalDb += 10.0f * std::log10 ((a * a + juce::square (w * A / nt.q)) / (a * a + juce::square (w / (A * nt.q))));
         }
-        const float y = yForDb (totalDb * scale);
+        const float y = yForDb (totalDb);
         if (px == 0) response.startNewSubPath ((float) px, y);
         else         response.lineTo ((float) px, y);
     }
-
     if (anyActive)
     {
         g.setColour (Colours::notch);
-        g.strokePath (response, juce::PathStrokeType (1.8f));
-
-        for (const auto& nt : notches)
-        {
-            if (! nt.active) continue;
-            const float x = xForFreq (nt.freq);
-            const float y = yForDb (-nt.depthDb);
-            g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
-            g.drawText (nt.freq >= 1000.0f ? juce::String (nt.freq / 1000.0f, 2) + "k" : juce::String (juce::roundToInt (nt.freq)),
-                        (int) x - 30, (int) y + 5, 60, 12, juce::Justification::centred);
-        }
+        g.strokePath (response, juce::PathStrokeType (1.6f));
     }
 }
 
 //==============================================================================
 DeFeedbackEditor::DeFeedbackEditor (DeFeedbackProcessor& p)
-    : AudioProcessorEditor (&p), processor (p), spectrum (p.getEngine())
+    : AudioProcessorEditor (&p), processor (p), spectrum (p)
 {
     setLookAndFeel (&lnf);
     addAndMakeVisible (spectrum);
 
-    addKnob (sensitivity, ParamIDs::sensitivity, "SENSITIVITY", feedbackRow);
-    addKnob (speed,       ParamIDs::speed,       "SPEED",       feedbackRow);
-    addKnob (release,     ParamIDs::release,     "RELEASE",     feedbackRow);
-    addKnob (maxDepth,    ParamIDs::maxDepth,    "MAX DEPTH",   feedbackRow);
-    addKnob (width,       ParamIDs::width,       "NOTCH Q",     feedbackRow);
-    addKnob (filters,     ParamIDs::filters,     "FILTERS",     feedbackRow);
-    addKnob (lowHz,       ParamIDs::lowHz,       "LOW LIMIT",   feedbackRow);
-    addKnob (highHz,      ParamIDs::highHz,      "HIGH LIMIT",  feedbackRow);
+    addKnob (amount,      ParamIDs::aiAmount,    "AMOUNT",      mainRow);
+    addKnob (deEss,       ParamIDs::deEss,       "DE-ESS",      mainRow);
+    addKnob (deEssFreq,   ParamIDs::deEssFreq,   "ESS FREQ",    mainRow);
+    addKnob (output,      ParamIDs::output,      "OUTPUT",      mainRow);
 
-    addKnob (deNoise,     ParamIDs::deNoise,     "DE-NOISE",    cleanupRow);
-    addKnob (deEss,       ParamIDs::deEss,       "DE-ESS",      cleanupRow);
-    addKnob (deEssFreq,   ParamIDs::deEssFreq,   "ESS FREQ",    cleanupRow);
+    addKnob (sensitivity, ParamIDs::sensitivity, "SENSITIVITY", notchRow);
+    addKnob (speed,       ParamIDs::speed,       "SPEED",       notchRow);
+    addKnob (release,     ParamIDs::release,     "RELEASE",     notchRow);
+    addKnob (maxDepth,    ParamIDs::maxDepth,    "MAX DEPTH",   notchRow);
+    addKnob (width,       ParamIDs::width,       "NOTCH Q",     notchRow);
+    addKnob (filters,     ParamIDs::filters,     "FILTERS",     notchRow);
+    addKnob (lowHz,       ParamIDs::lowHz,       "LOW LIMIT",   notchRow);
+    addKnob (highHz,      ParamIDs::highHz,      "HIGH LIMIT",  notchRow);
 
-    addKnob (mix,         ParamIDs::mix,         "MIX",         outputRow);
-    addKnob (output,      ParamIDs::output,      "OUTPUT",      outputRow);
+    amount.label.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    amount.label.setColour (juce::Label::textColourId, Colours::accent);
+    amount.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 90, 20);
 
-    for (auto* b : { &lockButton, &listenButton })
+    for (auto* b : { &listenButton, &notchButton, &lockButton })
     {
         b->setClickingTogglesState (true);
         addAndMakeVisible (*b);
     }
-    lockButton.setTooltip ("Keep every deployed notch in place (no release)");
-    listenButton.setTooltip ("Hear only what is being removed");
-    resetButton.setTooltip ("Clear all notches");
-    lockAttachment   = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (p.apvts, ParamIDs::lock, lockButton);
+    listenButton.setTooltip ("Hear only what the AI is removing");
+    notchButton.setTooltip ("Add classic adaptive notch filters after the AI (optional)");
+    lockButton.setTooltip ("Keep Notch Assist's notches in place");
+    resetButton.setTooltip ("Clear Notch Assist's notches");
     listenAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (p.apvts, ParamIDs::listen, listenButton);
-
+    notchAttachment  = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (p.apvts, ParamIDs::notchAssist, notchButton);
+    lockAttachment   = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (p.apvts, ParamIDs::lock, lockButton);
     resetButton.onClick = [this] { processor.requestReset(); };
     addAndMakeVisible (resetButton);
 
+    removedLabel.setJustificationType (juce::Justification::centred);
+    removedLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    addAndMakeVisible (removedLabel);
+
     status.setJustificationType (juce::Justification::centredRight);
-    status.setColour (juce::Label::textColourId, Colours::text);
+    status.setFont (juce::FontOptions (12.0f));
     addAndMakeVisible (status);
 
-    cleanupStatus.setJustificationType (juce::Justification::centredRight);
-    cleanupStatus.setFont (juce::FontOptions (11.0f));
-    addAndMakeVisible (cleanupStatus);
-
     setResizable (true, true);
-    setResizeLimits (760, 560, 1700, 1100);
-    setSize (900, 640);
+    setResizeLimits (760, 600, 1700, 1100);
+    setSize (900, 660);
     startTimerHz (10);
 }
 
@@ -247,14 +252,25 @@ void DeFeedbackEditor::addKnob (Knob& k, const char* paramId, const juce::String
 
 void DeFeedbackEditor::timerCallback()
 {
-    const int n = processor.getEngine().getNumActiveNotches();
-    status.setText (n == 0 ? "No feedback detected" : juce::String (n) + (n == 1 ? " notch active" : " notches active"),
-                    juce::dontSendNotification);
-    status.setColour (juce::Label::textColourId, n == 0 ? Colours::dim : Colours::notch);
+    const float removed = processor.getAi().getReductionDb();
+    removedLabel.setText (juce::String (removed, 1) + " dB removed", juce::dontSendNotification);
+    removedLabel.setColour (juce::Label::textColourId, removed > 3.0f ? Colours::notch : Colours::dim);
 
-    cleanupStatus.setText ("de-noise -" + juce::String (processor.getDenoiser().getReductionDb(), 1) + " dB   "
-                           + "de-ess -" + juce::String (processor.getDeEsser().getReductionDb(), 1) + " dB",
-                           juce::dontSendNotification);
+    const bool notchOn = processor.isNotchAssistOn();
+    for (auto* k : notchRow)
+    {
+        k->slider.setAlpha (notchOn ? 1.0f : 0.35f);
+        k->label.setAlpha (notchOn ? 1.0f : 0.35f);
+    }
+    lockButton.setEnabled (notchOn);
+    resetButton.setEnabled (notchOn);
+
+    const int notches = notchOn ? processor.getEngine().getNumActiveNotches() : 0;
+    status.setText ("AI active" + (notchOn ? "  |  " + juce::String (notches) + " notches" : juce::String())
+                    + "  |  de-ess -" + juce::String (processor.getDeEsser().getReductionDb(), 1) + " dB",
+                    juce::dontSendNotification);
+    status.setColour (juce::Label::textColourId, Colours::dim);
+    repaint (notchHeader);
 }
 
 void DeFeedbackEditor::paint (juce::Graphics& g)
@@ -264,18 +280,27 @@ void DeFeedbackEditor::paint (juce::Graphics& g)
     g.setColour (Colours::text);
     g.setFont (juce::FontOptions (22.0f, juce::Font::bold));
     g.drawText ("NoFeed", 16, 10, 200, 28, juce::Justification::left);
+    g.setColour (Colours::accent);
+    g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+    g.drawText ("AI", 106, 17, 20, 16, juce::Justification::left);
     g.setColour (Colours::dim);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("Feedback suppressor  /  de-noise  /  de-ess", 112, 16, 320, 18, juce::Justification::left);
+    g.drawText ("feedback suppressor  /  voice isolation", 126, 16, 300, 18, juce::Justification::left);
 
     g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-    for (auto [r, name] : { std::pair { feedbackHeader, "FEEDBACK" }, std::pair { cleanupHeader, "CLEAN-UP" }, std::pair { outputHeader, "OUTPUT" } })
-    {
-        g.setColour (Colours::accent);
-        g.drawText (name, r, juce::Justification::left);
-        g.setColour (Colours::grid);
-        g.drawHorizontalLine (r.getBottom() - 1, (float) r.getX(), (float) r.getRight());
-    }
+    g.setColour (Colours::accent);
+    g.drawText ("AI VOICE ISOLATION", mainHeader, juce::Justification::left);
+    g.setColour (Colours::grid);
+    g.drawHorizontalLine (mainHeader.getBottom() - 1, (float) mainHeader.getX(), (float) mainHeader.getRight());
+
+    g.setColour (processor.isNotchAssistOn() ? Colours::accent : Colours::dim);
+    g.drawText ("NOTCH ASSIST (OPTIONAL)", notchHeader, juce::Justification::left);
+    g.setColour (Colours::grid);
+    g.drawHorizontalLine (notchHeader.getBottom() - 1, (float) notchHeader.getX(), (float) notchHeader.getRight());
+
+    // ring around the main knob
+    g.setColour (Colours::accent.withAlpha (0.08f));
+    g.fillRoundedRectangle (amountArea.toFloat(), 8.0f);
 }
 
 void DeFeedbackEditor::layoutRow (juce::Rectangle<int> area, std::vector<Knob*>& row, int knobWidth)
@@ -293,35 +318,35 @@ void DeFeedbackEditor::resized()
     auto area = getLocalBounds().reduced (14);
     auto header = area.removeFromTop (34);
 
-    status.setBounds (header.removeFromRight (180));
+    status.setBounds (header.removeFromRight (250));
     header.removeFromRight (8);
-    resetButton.setBounds (header.removeFromRight (70).reduced (0, 4));
+    resetButton.setBounds (header.removeFromRight (64).reduced (0, 4));
+    header.removeFromRight (6);
+    lockButton.setBounds (header.removeFromRight (56).reduced (0, 4));
+    header.removeFromRight (6);
+    notchButton.setBounds (header.removeFromRight (110).reduced (0, 4));
     header.removeFromRight (6);
     listenButton.setBounds (header.removeFromRight (70).reduced (0, 4));
-    header.removeFromRight (6);
-    lockButton.setBounds (header.removeFromRight (70).reduced (0, 4));
 
-    const int rowHeight = juce::jlimit (105, 140, area.getHeight() / 5);
-    auto bottomRow = area.removeFromBottom (rowHeight + 20);
-    area.removeFromBottom (6);
-    auto topRow = area.removeFromBottom (rowHeight + 20);
+    auto notchArea = area.removeFromBottom (juce::jlimit (100, 130, area.getHeight() / 6) + 18);
+    area.removeFromBottom (8);
+    auto mainArea = area.removeFromBottom (juce::jlimit (150, 190, area.getHeight() / 3) + 18);
     area.removeFromBottom (10);
     spectrum.setBounds (area);
 
-    const int kw = topRow.getWidth() / (int) feedbackRow.size();
+    mainHeader = mainArea.removeFromTop (18);
+    mainArea.removeFromTop (4);
+    amountArea = mainArea.removeFromLeft (220);
+    {
+        auto a = amountArea.reduced (8);
+        removedLabel.setBounds (a.removeFromBottom (20));
+        amount.label.setBounds (a.removeFromTop (20));
+        amount.slider.setBounds (a);
+    }
+    mainArea.removeFromLeft (20);
+    std::vector<Knob*> rest { &deEss, &deEssFreq, &output };
+    layoutRow (mainArea.withTrimmedTop (10), rest, juce::jmin (130, mainArea.getWidth() / 3));
 
-    feedbackHeader = topRow.removeFromTop (18);
-    layoutRow (topRow, feedbackRow, kw);
-
-    auto cleanupArea = bottomRow.removeFromLeft (kw * (int) cleanupRow.size());
-    cleanupHeader = cleanupArea.removeFromTop (18);
-    layoutRow (cleanupArea, cleanupRow, kw);
-
-    auto outputArea = bottomRow.removeFromRight (kw * (int) outputRow.size());
-    outputHeader = outputArea.removeFromTop (18);
-    layoutRow (outputArea, outputRow, kw);
-
-    cleanupStatus.setBounds (bottomRow.reduced (8, 0).withTrimmedTop (18).removeFromTop (20));
-    cleanupHeader = cleanupHeader.withRight (cleanupHeader.getRight() - 8);
-    outputHeader  = outputHeader.withX (outputHeader.getX() + 8);
+    notchHeader = notchArea.removeFromTop (18);
+    layoutRow (notchArea, notchRow, notchArea.getWidth() / (int) notchRow.size());
 }

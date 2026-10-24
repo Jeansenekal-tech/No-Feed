@@ -45,7 +45,7 @@ juce_add_plugin(NoFeed
 target_sources(NoFeed PRIVATE
     Source/FeedbackEngine.cpp
     Source/DeEsser.cpp
-    Source/Denoiser.cpp
+    Source/AiVoiceEngine.cpp
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp)
 
@@ -55,8 +55,12 @@ target_compile_definitions(NoFeed PUBLIC
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0)
 
+# the trained network, embedded in the plugin binary
+juce_add_binary_data(NoFeedModel SOURCES Resources/model.bin)
+
 target_link_libraries(NoFeed
     PRIVATE
+        NoFeedModel
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC
@@ -69,8 +73,7 @@ if(NOFEED_BUILD_TESTS)
     target_sources(NoFeedTests PRIVATE
         Tests/LoopTest.cpp
         Source/FeedbackEngine.cpp
-        Source/DeEsser.cpp
-        Source/Denoiser.cpp)
+        Source/DeEsser.cpp)
     target_include_directories(NoFeedTests PRIVATE Source)
     target_compile_definitions(NoFeedTests PRIVATE
         JUCE_WEB_BROWSER=0
@@ -81,4 +84,14 @@ if(NOFEED_BUILD_TESTS)
         PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)
+endif()
+
+if(NOFEED_BUILD_TESTS)
+    juce_add_console_app(NoFeedAiTest PRODUCT_NAME "NoFeedAiTest")
+    target_sources(NoFeedAiTest PRIVATE Tests/AiTest.cpp Source/AiVoiceEngine.cpp)
+    target_include_directories(NoFeedAiTest PRIVATE Source)
+    target_compile_definitions(NoFeedAiTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(NoFeedAiTest
+        PRIVATE juce::juce_dsp
+        PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 endif()

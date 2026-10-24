@@ -12,21 +12,23 @@ public:
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool highlighted, bool down) override;
 };
 
-/** Live input spectrum with the deployed notches and their combined response on top. */
+/** Input spectrum (grey), AI output (cyan) and, with Notch Assist on, the notch response (red). */
 class SpectrumView : public juce::Component, private juce::Timer
 {
 public:
-    explicit SpectrumView (const dfb::FeedbackEngine& e);
+    explicit SpectrumView (const DeFeedbackProcessor& p);
     void paint (juce::Graphics&) override;
 
 private:
     void timerCallback() override;
     float xForFreq (float f) const;
     float yForDb (float db) const;
+    juce::Path makePath (const float* db, int n, bool closed) const;
 
-    const dfb::FeedbackEngine& engine;
-    std::array<float, dfb::FeedbackEngine::kDisplayPoints> spectrum {};
+    const DeFeedbackProcessor& processor;
+    std::array<float, dfb::AiVoiceEngine::kDisplayPoints> inDb {}, outDb {};
     std::array<dfb::FeedbackEngine::NotchSnapshot, dfb::FeedbackEngine::kMaxNotches> notches {};
+    bool showNotches = false;
 };
 
 class DeFeedbackEditor : public juce::AudioProcessorEditor, private juce::Timer
@@ -54,14 +56,14 @@ private:
     DeFeedbackLookAndFeel lnf;
     SpectrumView spectrum;
 
+    Knob amount, deEss, deEssFreq, output;
     Knob sensitivity, speed, release, maxDepth, width, filters, lowHz, highHz;
-    Knob deNoise, deEss, deEssFreq, mix, output;
-    std::vector<Knob*> feedbackRow, cleanupRow, outputRow;
-    juce::Rectangle<int> feedbackHeader, cleanupHeader, outputHeader;
+    std::vector<Knob*> mainRow, notchRow;
+    juce::Rectangle<int> amountArea, mainHeader, notchHeader;
 
-    juce::TextButton lockButton { "LOCK" }, listenButton { "LISTEN" }, resetButton { "RESET" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lockAttachment, listenAttachment;
-    juce::Label status, cleanupStatus;
+    juce::TextButton listenButton { "LISTEN" }, notchButton { "NOTCH ASSIST" }, lockButton { "LOCK" }, resetButton { "RESET" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> listenAttachment, notchAttachment, lockAttachment;
+    juce::Label removedLabel, status;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DeFeedbackEditor)
 };

@@ -7,7 +7,6 @@
 
 #include "FeedbackEngine.h"
 #include "DeEsser.h"
-#include "Denoiser.h"
 
 #include <cmath>
 #include <cstdio>
@@ -213,59 +212,7 @@ int main()
         check (maxNotches <= 1 && maxDepth < 12.0f, "voice alone triggers no significant notching");
     }
 
-    // ---- 4. de-noiser ---------------------------------------------------------------------
-    std::printf ("De-noiser: voice + steady noise at -40 dBFS\n");
-    {
-        std::mt19937 rng (7);
-        std::normal_distribution<float> gauss (0.0f, 1.0f);
-
-        // transparency at amount 0: output == input delayed by the reported latency
-        dfb::Denoiser dn;
-        dn.prepare (kSr, 1);
-        const int lat = dn.getLatencySamples();
-        std::vector<float> x (48000), y;
-        for (auto& v : x) v = 0.3f * gauss (rng);
-        y = x;
-        for (size_t pos = 0; pos < y.size(); pos += 480)
-        {
-            float* ch[] = { y.data() + pos };
-            dn.process (ch, 1, 480, 0.0f);
-        }
-        float maxErr = 0.0f;
-        for (size_t i = (size_t) lat; i < y.size(); ++i) maxErr = std::max (maxErr, std::abs (y[i] - x[i - (size_t) lat]));
-        std::printf ("  latency %d samples, reconstruction error at amount 0: %.2e\n", lat, maxErr);
-        check (maxErr < 1.0e-4f, "amount 0 is transparent (perfect reconstruction)");
-
-        auto noisy = makeVoice (10.0, 2);
-        const auto clean = noisy;
-        for (auto& v : noisy) v += 0.01f * gauss (rng);
-        const auto in = noisy;
-
-        dfb::Denoiser dn2;
-        dn2.prepare (kSr, 1);
-        for (size_t pos = 0; pos < noisy.size(); pos += 256)
-        {
-            float* ch[] = { noisy.data() + pos };
-            dn2.process (ch, 1, (int) std::min<size_t> (256, noisy.size() - pos), 0.7f);
-        }
-
-        // compare pauses (noise only) and vowel centres, compensating the latency
-        double gapIn = 0, gapOut = 0, vIn = 0, vOut = 0;
-        for (size_t i = 2 * (size_t) kSr; i + (size_t) lat < noisy.size(); ++i)
-        {
-            const double sp = std::fmod (i / kSr * 3.5, 1.0);
-            const float o = noisy[i + (size_t) lat];
-            if (sp > 0.9 && sp < 0.98)       { gapIn += in[i] * in[i]; gapOut += o * o; }
-            else if (sp > 0.3 && sp < 0.55)  { vIn += clean[i] * clean[i]; vOut += o * o; }
-        }
-        const float gapRed = 10.0f * std::log10 ((float) (gapIn / gapOut));
-        const float voiceChange = 10.0f * std::log10 ((float) (vOut / vIn));
-        std::printf ("  noise in pauses reduced by %.1f dB, vowel level change %.2f dB\n", gapRed, voiceChange);
-        check (gapRed > 10.0f, "noise in pauses reduced by more than 10 dB");
-        check (std::abs (voiceChange) < 1.5f, "voice level preserved within 1.5 dB");
-    }
-
-    // ---- 5. de-esser ----------------------------------------------------------------------
+    // ---- 4. de-esser ----------------------------------------------------------------------
     std::printf ("De-esser: voice + 80 ms sibilant bursts every 0.5 s\n");
     {
         std::mt19937 rng (3);

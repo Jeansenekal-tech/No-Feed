@@ -1,7 +1,9 @@
 # NoFeed
 
-Real-time **feedback killer** with **de-noise** and **de-ess**, as a **VST3** plugin (Windows, macOS,
-Linux), an **Audio Unit** (macOS), and a **standalone app**.
+**AI feedback suppressor** for live vocals, in the spirit of Alpha Labs De-Feedback. A neural network
+trained on thousands of simulated mic→speaker→room feedback loops keeps the **voice** and removes
+everything else (feedback, room echo and noise) before it can build up into a howl. It comes as a
+**VST3** plugin (Windows, macOS, Linux), an **Audio Unit** (macOS), and a **standalone app**.
 
 ![NoFeed UI](docs/screenshot.png)
 
@@ -38,42 +40,36 @@ After installing, **rescan plugins** in your DAW and look for **NoFeed** (by Uni
 
 ## What it does
 
-The chain is **De-Feedback → De-Noise → De-Ess → Mix / Output**.
+The chain is **AI voice isolation → Notch Assist (optional) → De-Ess → Output**.
 
-- **De-Feedback** (zero latency): watches the spectrum for peaks that behave like feedback. Those
-  are loud, pure tones that hold a steady pitch, keep building, and have no voice-like harmonics.
-  It drops a narrow notch exactly on each one, deepens it while the ringing continues, and lets it
-  go slowly once it's gone. It can run up to 16 notches at once.
-- **De-Noise** (~10.7 ms latency, reported to the DAW): learns hiss, hum and room tone by itself
-  during pauses and turns them down.
+- **AI voice isolation** (5.3 ms latency, reported to the DAW): a recurrent neural network looks at
+  the spectrum every 2.7 ms and works out which parts are the dry voice. Everything else gets
+  removed, including feedback, the speaker's own sound coming back into the mic, room reverb, hiss
+  and hum. Removing the speaker's sound breaks the feedback loop itself, so feedback can't build up.
+  This is the same idea as Alpha Labs De-Feedback.
+- **Notch Assist** (optional, zero latency): classic adaptive notch filters that hunt for ringing
+  tones. Turn it on as a safety net in extreme rooms.
 - **De-Ess** (zero latency): dips the top end only while an "s" or "sh" is happening.
 
 ### Controls
 
 | | |
 |---|---|
-| **Sensitivity** | How readily something counts as feedback. Lower it if sustained sung notes get notched. |
-| **Speed** | How quickly it reacts (~35–260 ms of confirmation). |
-| **Release** | How long a notch takes to fade after the feedback stops. |
-| **Max Depth** | The deepest cut a single notch may apply. |
-| **Notch Q** | Notch width (higher = narrower). |
-| **Filters** | The maximum number of notches at once. |
-| **Low / High Limit** | The frequency range searched for feedback. |
-| **Lock** | Freezes the current notches. Handy after "ringing out" a room. |
+| **Amount** | How much of the non-voice signal the AI removes (100 % = everything it detects). |
+| **De-Ess / Ess Freq** | De-esser amount (0 % = off) and the sibilance frequency. |
+| **Output** | Output level. |
 | **Listen** | Hear only what is being removed. |
-| **Reset** | Clears all notches. |
-| **De-Noise / De-Ess / Ess Freq** | The clean-up amounts (0 % = off) and the sibilance frequency. |
-| **Mix / Output** | Dry/wet mix and output level. |
+| **Notch Assist** | Turns on the classic notch filters, with their own Sensitivity, Speed, Release, Max Depth, Notch Q, Filters, Low/High Limit, Lock and Reset controls. |
 
-The display shows the live input spectrum, and the red curve shows the notches that are currently active.
+The display shows the input (grey) and the voice the AI keeps (cyan). The gap between them is
+what the AI removes, and the readout under **Amount** shows how many dB it is currently taking out.
 
-**Tips:** for live sound, put NoFeed first on the vocal mic channel. To ring out a room, turn the
-monitors up until it starts to ring, let NoFeed catch it, press **Lock**, and then back the volume
-off a little.
+**Tips:** put NoFeed first on the vocal mic channel and leave Amount at 100 %. If the voice sounds
+too dry or processed for a quiet room, back Amount off to 60–80 %.
 
-**Known limits:** NoFeed uses signal-processing detection, not a trained neural network. A howl that
-sits exactly on a moving voice harmonic can be missed. A dead-straight sung note (no vibrato) at high
-Sensitivity can be mistaken for feedback.
+**Known limits:** the AI was trained on speech and some singing at 48 kHz (44.1–192 kHz hosts are
+supported). It is tuned for vocals, not instruments. It needs roughly 10–15 % of one CPU core per
+instance.
 
 ## Building from source
 
@@ -88,8 +84,9 @@ cmake --build build --config Release
 The output lands in `build/NoFeed_artefacts/Release/`. On Linux, install these first:
 `sudo apt install libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev libxext-dev libfreetype6-dev libfontconfig1-dev`
 
-The DSP test suite (`NoFeedTests`) covers a simulated closed mic→speaker→room loop, a howl on a
-recording, false positives on voice alone, de-noise and de-ess.
+Tests: `NoFeedAiTest` checks that the C++ network matches PyTorch, that the low-latency STFT
+reconstructs perfectly, and the CPU cost. `NoFeedTests` covers Notch Assist and the de-esser.
+The training pipeline lives in [`training/`](training/README.md).
 
 ## Making a release
 
@@ -106,3 +103,7 @@ change `VERSION` just build and test.
 NoFeed is built with [JUCE](https://juce.com). JUCE 8 is available under the AGPLv3, or under a
 JUCE licence (there is a free *Personal* tier for small revenue). Pick a licence for this
 repository that matches how you plan to distribute it.
+
+The AI model is trained on the [EARS dataset](https://github.com/facebookresearch/ears_dataset),
+which is licensed **CC BY-NC 4.0 (non-commercial)**. You can use and share NoFeed for free, but
+selling it requires retraining on commercially licensed speech (see `training/README.md`).
