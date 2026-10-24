@@ -24,6 +24,18 @@ After installing, **rescan plugins** in your DAW and look for **NoFeed** (by Uni
 > On macOS, Gatekeeper says the package "can't be opened": **right-click → Open → Open**, or go to
 > *System Settings → Privacy & Security → Open Anyway*.
 
+## Troubleshooting
+
+**Plugin is "blacklisted" or missing in Waves SuperRack Performer (or another host)**
+1. Install the latest NoFeed release. Version 1.0.1 has no dependency on the Microsoft VC++
+   runtime and supports mono, stereo and mono-to-stereo racks.
+2. Make sure the plugin is in the default VST3 folder (`C:\Program Files\Common Files\VST3` on
+   Windows, `/Library/Audio/Plug-Ins/VST3` on macOS). If you use a custom folder, set it in
+   SuperRack under *Set Plugins Folder → Custom Folder*.
+3. In SuperRack Performer, **clear the VST3 cache and rescan**. A plugin that was blacklisted
+   once stays blacklisted until the cache is cleared, even after you update it.
+4. The plugin list only shows plugins that match the rack's channel format, so check the rack type too.
+
 ## What it does
 
 The chain is **De-Feedback → De-Noise → De-Ess → Mix / Output**.

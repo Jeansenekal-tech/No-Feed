@@ -92,10 +92,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout DeFeedbackProcessor::createL
 
 bool DeFeedbackProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
+    const auto& in  = layouts.getMainInputChannelSet();
     const auto& out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo())
         return false;
-    return layouts.getMainInputChannelSet() == out;
+
+    // mono -> mono, stereo -> stereo, and mono -> stereo (e.g. SuperRack mono-to-stereo racks)
+    return in == out || (in == juce::AudioChannelSet::mono() && out == juce::AudioChannelSet::stereo());
 }
 
 void DeFeedbackProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -125,8 +128,16 @@ void DeFeedbackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const int numOut = getTotalNumOutputChannels();
     const int numSamples = buffer.getNumSamples();
 
+    // mono in -> stereo out: feed the input to every output channel
     for (int ch = numIn; ch < numOut; ++ch)
-        buffer.clear (ch, 0, numSamples);
+    {
+        if (numIn > 0) buffer.copyFrom (ch, 0, buffer, 0, 0, numSamples);
+        else           buffer.clear (ch, 0, numSamples);
+    }
+
+    // some hosts' plugin scanners call process before prepareToPlay: pass audio through untouched
+    if (dryDelay.getNumSamples() == 0 || numSamples <= 0)
+        return;
 
     if (resetRequested.exchange (false))
         engine.reset();   // clears the notches only; de-noise keeps its learned noise floor

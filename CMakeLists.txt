@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "")
 
+# Link the C++ runtime statically on Windows so the plugin doesn't depend on the VC++
+# redistributable being installed. Hosts blacklist plugins whose DLL dependencies are missing.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 option(NOFEED_BUILD_TESTS "Build the offline feedback-loop test" ON)
 
 # JUCE is fetched automatically. To use a local checkout instead, configure with

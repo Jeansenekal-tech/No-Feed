@@ -88,6 +88,15 @@ jobs:
           exe=$(find build -type f \( -name NoFeedTests -o -name NoFeedTests.exe \) | head -1)
           "$exe"
 
+      - name: Check Windows plugin has no VC++ runtime DLL dependency
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find "VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          $deps = & $dumpbin /dependents "build\NoFeed_artefacts\Release\VST3\NoFeed.vst3\Contents\x86_64-win\NoFeed.vst3"
+          $deps
+          if ($deps -match '(?i)(vcruntime|msvcp)\d+') { throw "Plugin depends on the VC++ redistributable" }
+
       # ---------------- Windows: Inno Setup installer ----------------
       - name: Build Windows installer
         if: runner.os == 'Windows'
