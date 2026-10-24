@@ -9,10 +9,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-ROOT = os.environ.get("NOFEED_AI_DIR", os.path.expanduser("~/nofeed-ai"))  # data + checkpoints
-
 N_FFT, HOP, M = 1024, 128, 128
 BINS = N_FFT // 2 + 1
+ROOT = os.environ.get("NOFEED_AI_DIR", os.path.expanduser("~/nofeed-ai"))  # data + checkpoints
 torch.set_num_threads(4)
 
 
@@ -72,20 +71,30 @@ def load(split):
 
 
 def main():
+    # usage: train.py STEPS [INIT_CHECKPOINT CLOSED_LOOP_FRACTION]
     steps = int(sys.argv[1]) if len(sys.argv) > 1 else 6000
+    init = sys.argv[2] if len(sys.argv) > 2 else None
+    closed_frac = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
     out_dir = f"{ROOT}/model"; os.makedirs(out_dir, exist_ok=True)
     mic, tgt = load("train"); vmic, vtgt = load("val")
     print("train", mic.shape, "val", vmic.shape, flush=True)
+    if closed_frac > 0:
+        cmic, ctgt = load("closed")
+        print("closed-loop", cmic.shape, flush=True)
 
     net = Net()
-    # input normalisation statistics
-    with torch.no_grad():
-        idx = np.random.default_rng(0).choice(len(mic), 200, replace=False)
-        lp = logpow(stft(torch.tensor(mic[idx].astype(np.float32))))
-        net.mean.copy_(lp.mean((0, 1))); net.std.copy_(lp.std((0, 1)) + 1e-3)
+    if init:
+        net.load_state_dict(torch.load(init))
+    else:
+        # input normalisation statistics
+        with torch.no_grad():
+            idx = np.random.default_rng(0).choice(len(mic), 200, replace=False)
+            lp = logpow(stft(torch.tensor(mic[idx].astype(np.float32))))
+            net.mean.copy_(lp.mean((0, 1))); net.std.copy_(lp.std((0, 1)) + 1e-3)
 
-    opt = torch.optim.AdamW(net.parameters(), lr=1e-3, weight_decay=1e-4)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1.5e-3, total_steps=steps, pct_start=0.05)
+    max_lr = 1.5e-3 if init is None else 4e-4
+    opt = torch.optim.AdamW(net.parameters(), lr=max_lr, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=max_lr, total_steps=steps, pct_start=0.05)
     rng = np.random.default_rng(1)
     B, SEG = 16, 2 * 48000
     best = float("inf"); t0 = time.time()
@@ -100,10 +109,12 @@ def main():
         net.train(); return tot / len(vmic)
 
     for step in range(1, steps + 1):
-        idx = rng.integers(0, len(mic), B)
+        nc = int(round(B * closed_frac))
         off = rng.integers(0, mic.shape[1] - SEG, B)
-        xb = np.stack([mic[i, o:o + SEG] for i, o in zip(idx, off)]).astype(np.float32)
-        tb = np.stack([tgt[i, o:o + SEG] for i, o in zip(idx, off)]).astype(np.float32)
+        rows = [(mic, tgt, i) for i in rng.integers(0, len(mic), B - nc)]
+        if nc: rows += [(cmic, ctgt, i) for i in rng.integers(0, len(cmic), nc)]
+        xb = np.stack([a[i, o:o + SEG] for (a, _, i), o in zip(rows, off)]).astype(np.float32)
+        tb = np.stack([t[i, o:o + SEG] for (_, t, i), o in zip(rows, off)]).astype(np.float32)
         g = 10 ** (rng.uniform(-6, 6, (B, 1)) / 20).astype(np.float32)   # level augmentation
         X, S = stft(torch.tensor(np.clip(xb * g, -1, 1))), stft(torch.tensor(tb * g))
         loss = loss_fn(net(logpow(X)), X, S)
@@ -116,6 +127,7 @@ def main():
         if step % 500 == 0 or step == steps:
             vl = val_loss()
             print(f"  val {vl:.4f}", flush=True)
+            torch.save(net.state_dict(), f"{out_dir}/last.pt")
             if vl < best:
                 best = vl; torch.save(net.state_dict(), f"{out_dir}/best.pt")
     print("TRAIN_DONE best val", best, flush=True)

@@ -88,7 +88,7 @@ endif()
 
 if(NOFEED_BUILD_TESTS)
     juce_add_console_app(NoFeedAiTest PRODUCT_NAME "NoFeedAiTest")
-    target_sources(NoFeedAiTest PRIVATE Tests/AiTest.cpp Source/AiVoiceEngine.cpp)
+    target_sources(NoFeedAiTest PRIVATE Tests/AiTest.cpp Source/AiVoiceEngine.cpp Source/FeedbackEngine.cpp)
     target_include_directories(NoFeedAiTest PRIVATE Source)
     target_compile_definitions(NoFeedAiTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(NoFeedAiTest

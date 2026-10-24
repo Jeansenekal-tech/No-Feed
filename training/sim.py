@@ -9,7 +9,6 @@ but ringing (-6 dB) to clearly unstable (+3.5 dB, howling). The training target 
 voice only, so the network learns to remove feedback, the loop's re-emission of the voice,
 room reverb and noise.
 """
-import os
 import numpy as np
 import scipy.signal as ss
 
@@ -28,7 +27,7 @@ def peaking(f0, gain_db, q):
 def speaker_ir(rng, n=1024):
     x = np.zeros(n); x[0] = 1.0
     b, a = ss.butter(2, rng.uniform(60, 220) / (SR / 2), "high"); x = ss.lfilter(b, a, x)
-    b, a = ss.butter(2, rng.uniform(6000, 16000) / (SR / 2), "low"); x = ss.lfilter(b, a, x)
+    b, a = ss.butter(2, rng.uniform(6000, 20000 if rng.random() < 0.3 else 16000) / (SR / 2), "low"); x = ss.lfilter(b, a, x)
     for _ in range(rng.integers(2, 6)):
         b, a = peaking(np.exp(rng.uniform(np.log(150), np.log(9000))), rng.uniform(-9, 9), rng.uniform(0.7, 5))
         x = ss.lfilter(b, a, x)
@@ -47,7 +46,8 @@ def room_ir(rng, n):
     tail[:start] = 0
     b, a = ss.butter(1, rng.uniform(3000, 12000) / (SR / 2), "low")  # air absorption
     tail = ss.lfilter(b, a, tail)
-    drr = 10 ** (rng.uniform(-6, 8) / 10)                     # direct-to-reverberant ratio
+    # direct-to-reverberant ratio; 25 % of rooms are nearly dry (close monitor, dead stage)
+    drr = 10 ** ((rng.uniform(20, 35) if rng.random() < 0.25 else rng.uniform(-6, 8)) / 10)
     tail *= np.sqrt(np.sum(h ** 2) / (drr * np.sum(tail ** 2) + 1e-12))
     return h + tail
 
