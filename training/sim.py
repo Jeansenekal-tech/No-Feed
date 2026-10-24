@@ -63,7 +63,7 @@ def loop_ir(rng, total=4096):
 
 
 def colored_noise(rng, n):
-    kind = rng.integers(0, 4)
+    kind = rng.integers(0, 5)
     w = rng.standard_normal(n)
     if kind == 1:   # pink-ish
         b, a = [0.049922035, -0.095993537, 0.050612699, -0.004408786], [1, -2.494956002, 2.017265875, -0.522189400]
@@ -73,6 +73,11 @@ def colored_noise(rng, n):
     elif kind == 3:  # mains hum + harmonics + some hiss
         f0 = rng.choice([50, 60]); t = np.arange(n) / SR
         w = sum(rng.uniform(0.1, 1) / k * np.sin(2 * np.pi * f0 * k * t + rng.uniform(0, 6.28)) for k in range(1, 12)) + 0.05 * w
+    elif kind == 4:  # steady pure tones (whine, test tone, a howl already present): never voice
+        t = np.arange(n) / SR
+        w = sum(np.sin(2 * np.pi * np.exp(rng.uniform(np.log(150), np.log(9000))) * t
+                       * (1 + rng.uniform(0, 0.002) * np.sin(2 * np.pi * rng.uniform(0.1, 2) * t)) + rng.uniform(0, 6.28))
+                for _ in range(rng.integers(1, 4))) + 0.01 * w
     return w / (np.std(w) + 1e-12)
 
 
