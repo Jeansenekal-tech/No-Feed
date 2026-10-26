@@ -285,7 +285,8 @@ void DeFeedbackEditor::paint (juce::Graphics& g)
     g.drawText ("AI", 106, 17, 20, 16, juce::Justification::left);
     g.setColour (Colours::dim);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("feedback suppressor  /  voice isolation", 126, 16, 300, 18, juce::Justification::left);
+    g.drawText ("feedback suppressor  /  voice isolation   v" + juce::String (JucePlugin_VersionString),
+                126, 16, 360, 18, juce::Justification::left);
 
     g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
     g.setColour (Colours::accent);
